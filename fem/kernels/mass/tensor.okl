@@ -1,0 +1,164 @@
+// Copyright (c) 2010, Lawrence Livermore National Security, LLC. Produced at
+// the Lawrence Livermore National Laboratory. LLNL-CODE-443211. All Rights
+// reserved. See file COPYRIGHT for details.
+//
+// This file is part of the MFEM library. For more information and source code
+// availability see http://mfem.org.
+//
+// MFEM is free software; you can redistribute it and/or modify it under the
+// terms of the GNU Lesser General Public License (as published by the Free
+// Software Foundation) version 2.1 dated February 1999.
+
+#include "occa://mfem/fem/defines.okl"
+
+//---[ 1D ]-----------------------------
+kernel void Assemble1D(const int numElements,
+                       const double * restrict quadWeights,
+                       const Jacobian1D_t restrict J,
+                       const Coeff_t coeff,
+                       ScalarOperator1D_t restrict oper) {
+  for (int e = 0; e < numElements; ++e; outer) {
+    for (int q = 0; q < NUM_QUAD_1D; ++q; inner) {
+      oper(q, e) = quadWeights[q] * COEFF(q, e) * J(q, e);
+    }
+  }
+}
+
+kernel void Mult1D(const int numElements,
+                   const DofToQuad_t restrict dofToQuad,
+                   const DofToQuad_t restrict dofToQuadD,
+                   const QuadToDof_t restrict quadToDof,
+                   const QuadToDof_t restrict quadToDofD,
+                   const ScalarOperator1D_t restrict oper,
+                   Local1D_t restrict sol) {
+  // Iterate over elements
+  for (int e = 0; e < numElements; ++e; outer) {
+    double BS[NUM_QUAD_1D];
+    for (int qx = 0; qx < NUM_QUAD_1D; ++qx) {
+      BS[qx] = 0;
+    }
+    // BS{qx} = Q2D{qx,dx} * S{dx}
+    for (int dx = 0; dx < NUM_DOFS_1D; ++dx) {
+      const double s = sol(dx, e);
+      sol(dx, e) = 0;
+      for (int qx = 0; qx < NUM_QUAD_1D; ++qx) {
+        BS[qx] += s * dofToQuad(qx, dx);
+      }
+    }
+    // BS{qx} *= D{qx}
+    for (int qx = 0; qx < NUM_QUAD_1D; ++qx) {
+      BS[qx] *= oper(qx, e);
+    }
+    // S{dx} = D2Q{dx,qx} * BS{qx}
+    for (int qx = 0; qx < NUM_QUAD_1D; ++qx) {
+      for (int dx = 0; dx < NUM_DOFS_1D; ++dx) {
+        sol(dx, e) += BS[qx] * quadToDof(dx, qx);
+      }
+    }
+  }
+}
+//======================================
+
+
+//---[ 2D ]-----------------------------
+kernel void Assemble2D(const int numElements,
+                       const double * restrict quadWeights,
+                       const Jacobian2D_t restrict J,
+                       const Coeff_t coeff,
+                       ScalarOperator2D_t restrict oper) {
+  for (int e = 0; e < numElements; ++e; outer) {
+    for (int q = 0; q < NUM_QUAD_2D; ++q; inner) {
+      const double J11 = J(0, 0, q, e), J12 = J(1, 0, q, e);
+      const double J21 = J(0, 1, q, e), J22 = J(1, 1, q, e);
+
+      const double cdetJ = quadWeights[q] * COEFF(q, e) * ((J11 * J22) - (J21 * J12));
+
+      oper(q, e) =  cdetJ * (J12*J12 + J22*J22);
+    }
+  } // e
+}
+
+kernel void Mult2D(const int numElements,
+                   const DofToQuad_t restrict dofToQuad,
+                   const DofToQuad_t restrict dofToQuadD,
+                   const QuadToDof_t restrict quadToDof,
+                   const QuadToDof_t restrict quadToDofD,
+                   const ScalarOperator2D_t restrict oper,
+                   Local2D_t restrict sol) {
+  // Iterate over elements
+  for (int e = 0; e < numElements; ++e; outer) {
+    double BS[NUM_QUAD_1D][NUM_DOFS_1D];
+    // BS{qx,dy} = Q2D{qx,dx} * S{dx,dy}
+    // contract over dx -- add qx
+    for (int dy = 0; dy < NUM_DOFS_1D; ++dy) {
+      for (int qx = 0; qx < NUM_QUAD_1D; ++qx) {
+        BS[qx][dy] = 0;
+        for (int dx = 0; dx < NUM_DOFS_1D; ++dx) {
+          const double s = sol(dx, dy, e);
+          sol(dx, dy, e) = 0;
+          BS[qx][dy] += dofToQuad(dx, qx) * s;
+        }
+      }
+    }
+
+    double B2S[NUM_QUAD_1D][NUM_QUAD_1D];
+    // B2S{qx,qy} = Q2D{qy,dy} * BS{qx,dy}
+    // contract over dy -- add qy
+    for (int qy = 0; qy < NUM_QUAD_1D; ++qy) {
+      for (int qx = 0; qx < NUM_QUAD_1D; ++qx) {
+        B2S[qx][qy] = 0;
+        for (int dy = 0; dy < NUM_DOFS_1D; ++dy) {
+          B2S[qx][qy] += quadToDof(qy, dy) * BS[qx][dy];
+        }
+      }
+    }
+
+    // B2S{qx,qy} *= D{qx,qy}
+    for (int qx = 0; qx < NUM_QUAD_1D; ++qx) {
+      for (int qy = 0; qy < NUM_QUAD_1D; ++qy) {
+        B2S[qx][qy] *= oper(q, e);
+      }
+    }
+
+    // BS{qx,dy} = D2Q{dy,qy} * B2S{qx,qy}
+    // contract over qy -- add dy
+    for (int qx = 0; qx < NUM_QUAD_1D; ++qx) {
+      for (int dy = 0; dy < NUM_DOFS_1D; ++dy) {
+        BS[qx][dy] = 0;
+        for (int qy = 0; qy < NUM_QUAD_1D; ++qy) {
+          BS[qx][dy] += dofToQuad(dy, qy) * B2S[qx][qy];
+        }
+      }
+    }
+
+    // sol{dx,dy} = D2Q{dx,qx} * BS{qx,dy}
+    // contract over qx -- add dx
+    for (int dy = 0; dy < NUM_DOFS_1D; ++dy) {
+      for (int dx = 0; dx < NUM_DOFS_1D; ++dx) {
+        for (int qx = 0; qx < NUM_QUAD_1D; ++qx) {
+          sol(dx, dy, e) += dofToQuad(dx, qx) * BS[qx][dy];
+        }
+      }
+    }
+  } // e
+}
+//======================================
+
+
+//---[ 3D ]-----------------------------
+kernel void Assemble3D(const int numElements,
+                       const double * restrict quadWeights,
+                       const Jacobian3D_t restrict J,
+                       const Coeff_t coeff,
+                       ScalarOperator3D_t restrict oper) {
+}
+
+kernel void Mult3D(const int numElements,
+                   const DofToQuad_t restrict dofToQuad,
+                   const DofToQuad_t restrict dofToQuadD,
+                   const QuadToDof_t restrict quadToDof,
+                   const QuadToDof_t restrict quadToDofD,
+                   const ScalarOperator3D_t restrict oper,
+                   Local3D_t restrict sol) {
+}
+//======================================
