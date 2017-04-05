@@ -127,6 +127,46 @@ public:
 };
 
 
+/** Hypoelastic model that relates co-rotational (e.g. Jaumann) stress rate
+    with deformation rate (i.e., strain rate). To take into account the
+    non-linearity stemming from plasticity, we maintain the structure of the
+    NeoHookean model, defining a strain energy density function as
+    \f$ W(\sigma,\epsilon) = \frac{1}{2} \sigma:\epsilon \f$
+    where \f$\sigma\f$ is the Cauchy stress and \f$\epsilon^{e}\f$ is the
+    elastic infinitesimal strain. The parameters such as shear and bulk modulus
+    \f$\mu\f$ and K as well as plastic parameters and viscosity will have to
+    be given in the full-fledged version. We consider elasticity only for now.*/
+class HypoelastoplasticModel : public HyperelasticModel
+{
+protected:
+   mutable double mu, K, g;
+   Coefficient *c_mu, *c_K, *c_g;
+   bool have_coeffs;
+
+   mutable DenseMatrix Z;    // dim x dim
+   mutable DenseMatrix G, C; // dof x dim
+
+   inline void EvalCoeffs() const;
+
+public:
+   HypoelastoplasticModel(double _mu, double _K, double _g = 1.0)
+      : mu(_mu), K(_K), g(_g), have_coeffs(false) { c_mu = c_K = c_g = NULL; }
+
+   HypoelastoplasticModel(Coefficient &_mu, Coefficient &_K, Coefficient *_g = NULL)
+      : mu(0.0), K(0.0), g(1.0), c_mu(&_mu), c_K(&_K), c_g(_g),
+        have_coeffs(true) { }
+
+   virtual double EvalW(const DenseMatrix &J) const;
+
+   // Evaluate the Cauchy stress althrough P denotes the first
+   // Piola-Kirchhoff stress.
+   virtual void EvalP(const DenseMatrix &J, DenseMatrix &P) const;
+
+   virtual void AssembleH(const DenseMatrix &J, const DenseMatrix &DS,
+                          const double weight, DenseMatrix &A) const;
+};
+
+
 /// Hyperelastic integrator for any given HyperelasticModel
 class HyperelasticNLFIntegrator : public NonlinearFormIntegrator
 {

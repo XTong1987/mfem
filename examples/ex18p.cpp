@@ -22,14 +22,14 @@
 //                    (fixed)      +---------------------+
 //
 //               The example replaces the nonlinear operator (the
-//               class HyperelasticOperator defining H(x)) with a hypoelastic
+//               class HypoelasticOperator defining H(x)) with a hypoelastic
 //               operator as well as their implicit time integration using
 //               a Newton method for solving an associated reduced
 //               backward-Euler type nonlinear equation
 //               (class ReducedSystemOperator). Each Newton step requires the
 //               inversion of a Jacobian matrix, which is done through a
 //               (preconditioned) inner solver. Note that implementing the
-//               method HyperelasticOperator::ImplicitSolve is the only
+//               method HypoelasticOperator::ImplicitSolve is the only
 //               requirement for high-order implicit (SDIRK) time integration.
 //
 //               We recommend viewing examples 2 and 9 before viewing this
@@ -45,17 +45,17 @@ using namespace mfem;
 
 class ReducedSystemOperator;
 
-/** After spatial discretization, the hyperelastic model can be written as a
+/** After spatial discretization, the Hypoelastic model can be written as a
  *  system of ODEs:
  *     dv/dt = -M^{-1}*(H(x) + S*v)
  *     dx/dt = v,
  *  where x is the vector representing the deformation, v is the velocity field,
  *  M is the mass matrix, S is the viscosity matrix, and H(x) is the nonlinear
- *  hyperelastic operator.
+ *  Hypoelastic operator.
  *
- *  Class HyperelasticOperator represents the right-hand side of the above
+ *  Class HypoelasticOperator represents the right-hand side of the above
  *  system of ODEs. */
-class HyperelasticOperator : public TimeDependentOperator
+class HypoelasticOperator : public TimeDependentOperator
 {
 protected:
    ParFiniteElementSpace &fespace;
@@ -63,7 +63,7 @@ protected:
    ParBilinearForm M, S;
    ParNonlinearForm H;
    double viscosity;
-   HyperelasticModel *model;
+   HypoelasticModel *model;
 
    HypreParMatrix *Mmat; // Mass matrix from ParallelAssemble()
    CGSolver M_solver;    // Krylov solver for inverting the mass matrix M
@@ -84,7 +84,7 @@ protected:
    mutable Vector z; // auxiliary vector
 
 public:
-   HyperelasticOperator(ParFiniteElementSpace &f, Array<int> &ess_bdr,
+   HypoelasticOperator(ParFiniteElementSpace &f, Array<int> &ess_bdr,
                         double visc, double mu, double K);
 
    /// Compute the right-hand side of the ODE system.
@@ -97,7 +97,7 @@ public:
    double KineticEnergy(ParGridFunction &v) const;
    void GetElasticEnergyDensity(ParGridFunction &x, ParGridFunction &w) const;
 
-   virtual ~HyperelasticOperator();
+   virtual ~HypoelasticOperator();
 };
 
 /** Nonlinear operator of the form:
@@ -131,17 +131,17 @@ public:
 };
 
 
-/** Function representing the elastic energy density for the given hyperelastic
-    model+deformation. Used in HyperelasticOperator::GetElasticEnergyDensity. */
+/** Function representing the elastic energy density for the given Hypoelastic
+    model+deformation. Used in HypoelasticOperator::GetElasticEnergyDensity. */
 class ElasticEnergyCoefficient : public Coefficient
 {
 private:
-   HyperelasticModel &model;
+   HypoelasticModel &model;
    ParGridFunction   &x;
    DenseMatrix        J;
 
 public:
-   ElasticEnergyCoefficient(HyperelasticModel &m, ParGridFunction &x_)
+   ElasticEnergyCoefficient(HypoelasticModel &m, ParGridFunction &x_)
       : model(m), x(x_) { }
    virtual double Eval(ElementTransformation &T, const IntegrationPoint &ip);
    virtual ~ElasticEnergyCoefficient() { }
@@ -198,9 +198,9 @@ int main(int argc, char *argv[])
    args.AddOption(&visc, "-v", "--viscosity",
                   "Viscosity coefficient.");
    args.AddOption(&mu, "-mu", "--shear-modulus",
-                  "Shear modulus in the Neo-Hookean hyperelastic model.");
+                  "Shear modulus in the Neo-Hookean Hypoelastic model.");
    args.AddOption(&K, "-K", "--bulk-modulus",
-                  "Bulk modulus in the Neo-Hookean hyperelastic model.");
+                  "Bulk modulus in the Neo-Hookean Hypoelastic model.");
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
@@ -317,9 +317,9 @@ int main(int argc, char *argv[])
    ess_bdr = 0;
    ess_bdr[0] = 1; // boundary attribute 1 (index 0) is fixed
 
-   // 9. Initialize the hyperelastic operator, the GLVis visualization and print
+   // 9. Initialize the Hypoelastic operator, the GLVis visualization and print
    //    the initial energies.
-   HyperelasticOperator oper(fespace, ess_bdr, visc, mu, K);
+   HypoelasticOperator oper(fespace, ess_bdr, visc, mu, K);
 
    socketstream vis_v, vis_w;
    if (visualization)
@@ -499,7 +499,7 @@ ReducedSystemOperator::~ReducedSystemOperator()
 }
 
 
-HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace &f,
+HypoelasticOperator::HypoelasticOperator(ParFiniteElementSpace &f,
                                            Array<int> &ess_bdr, double visc,
                                            double mu, double K)
    : TimeDependentOperator(2*f.TrueVSize(), 0.0), fespace(f),
@@ -527,7 +527,7 @@ HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace &f,
    M_solver.SetPreconditioner(M_prec);
    M_solver.SetOperator(*Mmat);
 
-   model = new NeoHookeanModel(mu, K);
+   model = new HypoelastoplasticModel(mu, K);
    H.AddDomainIntegrator(new HyperelasticNLFIntegrator(model));
    H.SetEssentialBC(ess_bdr);
 
@@ -561,7 +561,7 @@ HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace &f,
    newton_solver.SetMaxIter(10);
 }
 
-void HyperelasticOperator::Mult(const Vector &vx, Vector &dvx_dt) const
+void HypoelasticOperator::Mult(const Vector &vx, Vector &dvx_dt) const
 {
    // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
    int sc = height/2;
@@ -581,7 +581,7 @@ void HyperelasticOperator::Mult(const Vector &vx, Vector &dvx_dt) const
    dx_dt = v;
 }
 
-void HyperelasticOperator::ImplicitSolve(const double dt,
+void HypoelasticOperator::ImplicitSolve(const double dt,
                                          const Vector &vx, Vector &dvx_dt)
 {
    int sc = height/2;
@@ -603,12 +603,12 @@ void HyperelasticOperator::ImplicitSolve(const double dt,
    add(v, dt, dv_dt, dx_dt);
 }
 
-double HyperelasticOperator::ElasticEnergy(ParGridFunction &x) const
+double HypoelasticOperator::ElasticEnergy(ParGridFunction &x) const
 {
    return H.GetEnergy(x);
 }
 
-double HyperelasticOperator::KineticEnergy(ParGridFunction &v) const
+double HypoelasticOperator::KineticEnergy(ParGridFunction &v) const
 {
    double loc_energy = 0.5*M.InnerProduct(v, v);
    double energy;
@@ -617,14 +617,14 @@ double HyperelasticOperator::KineticEnergy(ParGridFunction &v) const
    return energy;
 }
 
-void HyperelasticOperator::GetElasticEnergyDensity(
+void HypoelasticOperator::GetElasticEnergyDensity(
    ParGridFunction &x, ParGridFunction &w) const
 {
    ElasticEnergyCoefficient w_coeff(*model, x);
    w.ProjectCoefficient(w_coeff);
 }
 
-HyperelasticOperator::~HyperelasticOperator()
+HypoelasticOperator::~HypoelasticOperator()
 {
    delete J_solver;
    delete J_prec;
