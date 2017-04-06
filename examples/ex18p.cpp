@@ -528,7 +528,7 @@ HypoelastoplasticOperator::HypoelastoplasticOperator(ParFiniteElementSpace &f,
    M_solver.SetOperator(*Mmat);
 
    model = new HypoelastoplasticModel(mu, K);
-   H.AddDomainIntegrator(new HyperelasticNLFIntegrator(model));
+   H.AddDomainIntegrator(new HypoelastoplasticNLFIntegrator(model));
    H.SetEssentialBC(ess_bdr);
 
    ConstantCoefficient visc_coeff(viscosity);

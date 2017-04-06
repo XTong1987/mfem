@@ -474,4 +474,114 @@ HyperelasticNLFIntegrator::~HyperelasticNLFIntegrator()
    PMatO.ClearExternalData();
 }
 
+
+double HypoelastoplasticNLFIntegrator::GetElementEnergy(const FiniteElement &el,
+                                                   ElementTransformation &Tr,
+                                                   const Vector &elfun)
+{
+   int dof = el.GetDof(), dim = el.GetDim();
+   double energy;
+
+   DSh.SetSize(dof, dim);
+   J0i.SetSize(dim);
+   J1.SetSize(dim);
+   J.SetSize(dim);
+   PMatI.UseExternalData(elfun.GetData(), dof, dim);
+
+   int intorder = 2*el.GetOrder() + 3; // <---
+   const IntegrationRule &ir = IntRules.Get(el.GetGeomType(), intorder);
+
+   energy = 0.0;
+   model->SetTransformation(Tr);
+   for (int i = 0; i < ir.GetNPoints(); i++)
+   {
+      const IntegrationPoint &ip = ir.IntPoint(i);
+      Tr.SetIntPoint(&ip);
+      CalcInverse(Tr.Jacobian(), J0i);
+
+      el.CalcDShape(ip, DSh);
+      MultAtB(PMatI, DSh, J1);
+      Mult(J1, J0i, J);
+
+      energy += ip.weight*Tr.Weight()*model->EvalW(J);
+   }
+
+   return energy;
+}
+
+void HypoelastoplasticNLFIntegrator::AssembleElementVector(
+   const FiniteElement &el, ElementTransformation &Tr, const Vector &elfun,
+   Vector &elvect)
+{
+   int dof = el.GetDof(), dim = el.GetDim();
+
+   DSh.SetSize(dof, dim);
+   DS.SetSize(dof, dim);
+   J0i.SetSize(dim);
+   J.SetSize(dim);
+   P.SetSize(dim);
+   PMatI.UseExternalData(elfun.GetData(), dof, dim);
+   elvect.SetSize(dof*dim);
+   PMatO.UseExternalData(elvect.GetData(), dof, dim);
+
+   int intorder = 2*el.GetOrder() + 3; // <---
+   const IntegrationRule &ir = IntRules.Get(el.GetGeomType(), intorder);
+
+   elvect = 0.0;
+   model->SetTransformation(Tr);
+   for (int i = 0; i < ir.GetNPoints(); i++)
+   {
+      const IntegrationPoint &ip = ir.IntPoint(i);
+      Tr.SetIntPoint(&ip);
+      CalcInverse(Tr.Jacobian(), J0i);
+
+      el.CalcDShape(ip, DSh);
+      Mult(DSh, J0i, DS);
+      MultAtB(PMatI, DS, J);
+
+      model->EvalP(J, P);
+
+      P *= ip.weight*Tr.Weight();
+      AddMultABt(DS, P, PMatO);
+   }
+}
+
+void HypoelastoplasticNLFIntegrator::AssembleElementGrad(
+   const FiniteElement &el, ElementTransformation &Tr, const Vector &elfun,
+   DenseMatrix &elmat)
+{
+   int dof = el.GetDof(), dim = el.GetDim();
+
+   DSh.SetSize(dof, dim);
+   DS.SetSize(dof, dim);
+   J0i.SetSize(dim);
+   J.SetSize(dim);
+   PMatI.UseExternalData(elfun.GetData(), dof, dim);
+   elmat.SetSize(dof*dim);
+
+   int intorder = 2*el.GetOrder() + 3; // <---
+   const IntegrationRule &ir = IntRules.Get(el.GetGeomType(), intorder);
+
+   elmat = 0.0;
+   model->SetTransformation(Tr);
+   for (int i = 0; i < ir.GetNPoints(); i++)
+   {
+      const IntegrationPoint &ip = ir.IntPoint(i);
+      Tr.SetIntPoint(&ip);
+      CalcInverse(Tr.Jacobian(), J0i);
+
+      el.CalcDShape(ip, DSh);
+      Mult(DSh, J0i, DS);
+      MultAtB(PMatI, DS, J);
+
+      model->AssembleH(J, DS, ip.weight*Tr.Weight(), elmat);
+   }
+}
+
+HypoelastoplasticNLFIntegrator::~HypoelastoplasticNLFIntegrator()
+{
+   PMatI.ClearExternalData();
+   PMatO.ClearExternalData();
+}
+
 }

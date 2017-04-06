@@ -193,6 +193,33 @@ public:
    virtual ~HyperelasticNLFIntegrator();
 };
 
+
+/// Hyperelastic integrator for any given HyperelasticModel
+class HypoelastoplasticNLFIntegrator : public NonlinearFormIntegrator
+{
+private:
+   HypoelastoplasticModel *model;
+
+   DenseMatrix DSh, DS, J0i, J1, J, P, PMatI, PMatO;
+
+public:
+   HypoelastoplasticNLFIntegrator(HypoelastoplasticModel *m) : model(m) { }
+   
+   virtual double GetElementEnergy(const FiniteElement &el,
+                                   ElementTransformation &Tr,
+                                   const Vector &elfun);
+
+   virtual void AssembleElementVector(const FiniteElement &el,
+                                      ElementTransformation &Tr,
+                                      const Vector &elfun, Vector &elvect);
+
+   virtual void AssembleElementGrad(const FiniteElement &el,
+                                    ElementTransformation &Tr,
+                                    const Vector &elfun, DenseMatrix &elmat);
+
+   virtual ~HypoelastoplasticNLFIntegrator();
+};
+
 }
 
 #endif
