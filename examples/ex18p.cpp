@@ -55,7 +55,7 @@ class ReducedSystemOperator;
  *
  *  Class HypoelasticOperator represents the right-hand side of the above
  *  system of ODEs. */
-class HypoelasticOperator : public TimeDependentOperator
+class HypoelastoplasticOperator : public TimeDependentOperator
 {
 protected:
    ParFiniteElementSpace &fespace;
@@ -63,7 +63,7 @@ protected:
    ParBilinearForm M, S;
    ParNonlinearForm H;
    double viscosity;
-   HypoelasticModel *model;
+   HypoelastoplasticModel *model;
 
    HypreParMatrix *Mmat; // Mass matrix from ParallelAssemble()
    CGSolver M_solver;    // Krylov solver for inverting the mass matrix M
@@ -84,7 +84,7 @@ protected:
    mutable Vector z; // auxiliary vector
 
 public:
-   HypoelasticOperator(ParFiniteElementSpace &f, Array<int> &ess_bdr,
+   HypoelastoplasticOperator(ParFiniteElementSpace &f, Array<int> &ess_bdr,
                         double visc, double mu, double K);
 
    /// Compute the right-hand side of the ODE system.
@@ -97,7 +97,7 @@ public:
    double KineticEnergy(ParGridFunction &v) const;
    void GetElasticEnergyDensity(ParGridFunction &x, ParGridFunction &w) const;
 
-   virtual ~HypoelasticOperator();
+   virtual ~HypoelastoplasticOperator();
 };
 
 /** Nonlinear operator of the form:
@@ -136,12 +136,12 @@ public:
 class ElasticEnergyCoefficient : public Coefficient
 {
 private:
-   HypoelasticModel &model;
+   HypoelastoplasticModel &model;
    ParGridFunction   &x;
    DenseMatrix        J;
 
 public:
-   ElasticEnergyCoefficient(HypoelasticModel &m, ParGridFunction &x_)
+   ElasticEnergyCoefficient(HypoelastoplasticModel &m, ParGridFunction &x_)
       : model(m), x(x_) { }
    virtual double Eval(ElementTransformation &T, const IntegrationPoint &ip);
    virtual ~ElasticEnergyCoefficient() { }
@@ -317,9 +317,9 @@ int main(int argc, char *argv[])
    ess_bdr = 0;
    ess_bdr[0] = 1; // boundary attribute 1 (index 0) is fixed
 
-   // 9. Initialize the Hypoelastic operator, the GLVis visualization and print
+   // 9. Initialize the Hypoelastoplastic operator, the GLVis visualization and print
    //    the initial energies.
-   HypoelasticOperator oper(fespace, ess_bdr, visc, mu, K);
+   HypoelastoplasticOperator oper(fespace, ess_bdr, visc, mu, K);
 
    socketstream vis_v, vis_w;
    if (visualization)
@@ -499,7 +499,7 @@ ReducedSystemOperator::~ReducedSystemOperator()
 }
 
 
-HypoelasticOperator::HypoelasticOperator(ParFiniteElementSpace &f,
+HypoelastoplasticOperator::HypoelastoplasticOperator(ParFiniteElementSpace &f,
                                            Array<int> &ess_bdr, double visc,
                                            double mu, double K)
    : TimeDependentOperator(2*f.TrueVSize(), 0.0), fespace(f),
@@ -561,7 +561,7 @@ HypoelasticOperator::HypoelasticOperator(ParFiniteElementSpace &f,
    newton_solver.SetMaxIter(10);
 }
 
-void HypoelasticOperator::Mult(const Vector &vx, Vector &dvx_dt) const
+void HypoelastoplasticOperator::Mult(const Vector &vx, Vector &dvx_dt) const
 {
    // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
    int sc = height/2;
@@ -581,7 +581,7 @@ void HypoelasticOperator::Mult(const Vector &vx, Vector &dvx_dt) const
    dx_dt = v;
 }
 
-void HypoelasticOperator::ImplicitSolve(const double dt,
+void HypoelastoplasticOperator::ImplicitSolve(const double dt,
                                          const Vector &vx, Vector &dvx_dt)
 {
    int sc = height/2;
@@ -603,12 +603,12 @@ void HypoelasticOperator::ImplicitSolve(const double dt,
    add(v, dt, dv_dt, dx_dt);
 }
 
-double HypoelasticOperator::ElasticEnergy(ParGridFunction &x) const
+double HypoelastoplasticOperator::ElasticEnergy(ParGridFunction &x) const
 {
    return H.GetEnergy(x);
 }
 
-double HypoelasticOperator::KineticEnergy(ParGridFunction &v) const
+double HypoelastoplasticOperator::KineticEnergy(ParGridFunction &v) const
 {
    double loc_energy = 0.5*M.InnerProduct(v, v);
    double energy;
@@ -617,14 +617,14 @@ double HypoelasticOperator::KineticEnergy(ParGridFunction &v) const
    return energy;
 }
 
-void HypoelasticOperator::GetElasticEnergyDensity(
+void HypoelastoplasticOperator::GetElasticEnergyDensity(
    ParGridFunction &x, ParGridFunction &w) const
 {
    ElasticEnergyCoefficient w_coeff(*model, x);
    w.ProjectCoefficient(w_coeff);
 }
 
-HypoelasticOperator::~HypoelasticOperator()
+HypoelastoplasticOperator::~HypoelastoplasticOperator()
 {
    delete J_solver;
    delete J_prec;

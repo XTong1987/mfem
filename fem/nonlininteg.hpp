@@ -127,7 +127,7 @@ public:
 };
 
 
-/** Hypoelastic model that relates co-rotational (e.g. Jaumann) stress rate
+/** Hypoelastoplastic model that relates co-rotational (e.g. Jaumann) stress rate
     with deformation rate (i.e., strain rate). To take into account the
     non-linearity stemming from plasticity, we maintain the structure of the
     NeoHookean model, defining a strain energy density function as
