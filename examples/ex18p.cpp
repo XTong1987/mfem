@@ -147,6 +147,26 @@ public:
    virtual ~ElasticEnergyCoefficient() { }
 };
 
+// A Coefficient for computing the components of the stress.
+class StressCoefficient : public Coefficient
+{
+protected:
+   Coefficient &lambda, &mu;
+   GridFunction *u; // displacement
+   int si, sj; // component of the stress to evaluate, 0 <= si,sj < dim
+
+   DenseMatrix grad; // auxiliary matrix, used in Eval
+
+public:
+   StressCoefficient(Coefficient &lambda_, Coefficient &mu_)
+      : lambda(lambda_), mu(mu_), u(NULL), si(0), sj(0) { }
+
+   void SetDisplacement(GridFunction &u_) { u = &u_; }
+   void SetComponent(int i, int j) { si = i; sj = j; }
+
+   virtual double Eval(ElementTransformation &T, const IntegrationPoint &ip);
+};
+
 void InitialDeformation(const Vector &x, Vector &y);
 
 void InitialVelocity(const Vector &x, Vector &v);
@@ -302,6 +322,12 @@ int main(int argc, char *argv[])
    L2_FECollection w_fec(order + 1, dim);
    ParFiniteElementSpace w_fespace(pmesh, &w_fec);
    ParGridFunction w_gf(&w_fespace);
+   ParGridFunction sig11_gf(&w_fespace);
+   ParGridFunction sig22_gf(&w_fespace);
+   ParGridFunction sig33_gf(&w_fespace);
+   ParGridFunction sig12_gf(&w_fespace);
+   ParGridFunction sig23_gf(&w_fespace);
+   ParGridFunction sig31_gf(&w_fespace);
 
    // 8. Set the initial conditions for v_gf, x_gf and vx, and define the
    //    boundary conditions on a beam-like mesh (see description above).
@@ -402,17 +428,51 @@ int main(int argc, char *argv[])
       velo_name << "velocity." << setfill('0') << setw(6) << myid;
       ee_name << "elastic_energy." << setfill('0') << setw(6) << myid;
 
+      ostringstream sig11_name, sig22_name, sig33_name, sig12_name, sig23_name, sig31_name;
+      sig11_name << "sigma11." << setfill('0') << setw(6) << myid;
+      sig22_name << "sigma22." << setfill('0') << setw(6) << myid;
+      sig33_name << "sigma33." << setfill('0') << setw(6) << myid;
+      sig12_name << "sigma12." << setfill('0') << setw(6) << myid;
+      sig23_name << "sigma23." << setfill('0') << setw(6) << myid;
+      sig31_name << "sigma31." << setfill('0') << setw(6) << myid;
+
       ofstream mesh_ofs(mesh_name.str().c_str());
       mesh_ofs.precision(8);
       pmesh->Print(mesh_ofs);
       pmesh->SwapNodes(nodes, owns_nodes);
+
       ofstream velo_ofs(velo_name.str().c_str());
       velo_ofs.precision(8);
       v_gf.Save(velo_ofs);
+
       ofstream ee_ofs(ee_name.str().c_str());
       ee_ofs.precision(8);
       oper.GetElasticEnergyDensity(x_gf, w_gf);
       w_gf.Save(ee_ofs);
+
+      ofstream sig11_ofs(sig11_name.str().c_str());
+      sig11_ofs.precision(8);
+      sig11_gf.Save(sig11_ofs);
+
+      ofstream sig22_ofs(sig22_name.str().c_str());
+      sig22_ofs.precision(8);
+      sig22_gf.Save(sig22_ofs);
+
+      ofstream sig33_ofs(sig33_name.str().c_str());
+      sig33_ofs.precision(8);
+      sig33_gf.Save(sig33_ofs);
+
+      ofstream sig12_ofs(sig12_name.str().c_str());
+      sig12_ofs.precision(8);
+      sig12_gf.Save(sig12_ofs);
+
+      ofstream sig23_ofs(sig23_name.str().c_str());
+      sig23_ofs.precision(8);
+      sig23_gf.Save(sig23_ofs);
+
+      ofstream sig31_ofs(sig31_name.str().c_str());
+      sig31_ofs.precision(8);
+      sig31_gf.Save(sig31_ofs);
    }
 
    // 12. Free the used memory.
@@ -563,6 +623,9 @@ HypoelastoplasticOperator::HypoelastoplasticOperator(ParFiniteElementSpace &f,
 
 void HypoelastoplasticOperator::Mult(const Vector &vx, Vector &dvx_dt) const
 {
+   // compute dv/dt = M^-1 (H(x) + S v) and dx/dt = v
+   // This is used by explicit ODE_Solvers like ForwardEulerSolver.
+
    // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
    int sc = height/2;
    Vector v(vx.GetData() +  0, sc);
@@ -570,13 +633,13 @@ void HypoelastoplasticOperator::Mult(const Vector &vx, Vector &dvx_dt) const
    Vector dv_dt(dvx_dt.GetData() +  0, sc);
    Vector dx_dt(dvx_dt.GetData() + sc, sc);
 
-   H.Mult(x, z);
+   H.Mult(x, z); // z = H(x)
    if (viscosity != 0.0)
    {
-      S.TrueAddMult(v, z);
+      S.TrueAddMult(v, z); // z = H(x) + Sv
    }
-   z.Neg(); // z = -z
-   M_solver.Mult(z, dv_dt);
+   z.Neg(); // z = -z = -(H(x)+Sv)
+   M_solver.Mult(z, dv_dt); // dv_dt = M^-1 * z = M^-1 (H(x) + S v)
 
    dx_dt = v;
 }
