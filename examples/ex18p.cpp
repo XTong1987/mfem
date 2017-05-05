@@ -86,7 +86,9 @@ protected:
 public:
    HypoelastoplasticOperator(ParFiniteElementSpace &f, Array<int> &ess_bdr,
                         double visc, double mu, double K);
-
+   HypoelastoplasticOperator(ParFiniteElementSpace &f, Array<int> &ess_bdr,
+                        double visc, PWConstCoefficient mu_func,
+                        PWConstCoefficient lambda_func);
    /// Compute the right-hand side of the ODE system.
    virtual void Mult(const Vector &vx, Vector &dvx_dt) const;
    /** Solve the Backward-Euler equation: k = f(x + dt*k, t), for the unknown k.
@@ -148,23 +150,47 @@ public:
 };
 
 // A Coefficient for computing the components of the stress.
-class StressCoefficient : public Coefficient
+class CauchyStressIncrementCoefficient : public VectorCoefficient
 {
-protected:
+private:
+   int spacedim;
+   GridFunction &u;
    Coefficient &lambda, &mu;
-   GridFunction *u; // displacement
-   int si, sj; // component of the stress to evaluate, 0 <= si,sj < dim
-
-   DenseMatrix grad; // auxiliary matrix, used in Eval
+   DenseMatrix eps, sigma;
 
 public:
-   StressCoefficient(Coefficient &lambda_, Coefficient &mu_)
-      : lambda(lambda_), mu(mu_), u(NULL), si(0), sj(0) { }
+   CauchyStressIncrementCoefficient(int vd, int sd, GridFunction &_u,
+                                    Coefficient &_lambda, Coefficient &_mu)
+      : u(_u), lambda(_lambda), mu(_mu) { vdim = vd; spacedim = sd; time = 0.; }
 
-   void SetDisplacement(GridFunction &u_) { u = &u_; }
-   void SetComponent(int i, int j) { si = i; sj = j; }
+   virtual void Eval(Vector &V, ElementTransformation &T,
+                       const IntegrationPoint &ip)
+   {
+      u.GetVectorGradient(T, eps);  // eps = grad(u)
+      eps.Symmetrize();             // eps = (1/2)*(grad(u) + grad(u)^t)
+      double l = lambda.Eval(T, ip);
+      double m = mu.Eval(T, ip);
+      sigma.Diag(l*eps.Trace(), eps.Size()); // sigma = lambda*trace(eps)*I
+      sigma.Add(2*m, eps);          // sigma += 2*mu*eps
 
-   virtual double Eval(ElementTransformation &T, const IntegrationPoint &ip);
+      if( spacedim == 2 ) {
+          V(0) = sigma(0,0);
+          V(1) = sigma(1,1);
+          V(2) = sigma(0,1);
+          V(3) = sigma(1,2):
+      }
+      else if ( spacedim ==3 ) {
+          V(0) = sigma(0,0);
+          V(1) = sigma(1,1);
+          V(2) = sigma(2,2);
+          V(3) = sigma(0,1);
+          V(4) = sigma(1,2):
+          V(5) = sigma(0,2);
+      }
+   }
+
+   virtual void Read(istream &in) { }
+   virtual ~MyCoefficient() { }
 };
 
 void InitialDeformation(const Vector &x, Vector &y);
@@ -193,10 +219,9 @@ int main(int argc, char *argv[])
    double t_final = 300.0;
    double dt = 3.0;
    double visc = 1e-2;
-   double mu = 0.25;
-   double K = 5.0;
    bool visualization = true;
    int vis_steps = 1;
+
 
    OptionsParser args(argc, argv);
    args.AddOption(&mesh_file, "-m", "--mesh",
@@ -293,6 +318,18 @@ int main(int argc, char *argv[])
       pmesh->UniformRefinement();
    }
 
+   // 6.1 Piece-wise constants coefficient lambda and mu.
+   Vector lambda(pmesh->attributes.Max());
+   lambda = 1.0;
+   Vector mu(pmesh->attributes.Max());
+   mu = 1.0;
+   if(pmesh->attributes.Max() > 1) {
+     lambda(0) = lambda(1)*50;
+     mu(0) = mu(1)*50;
+   }
+   PWConstCoefficient lambda_func(lambda);
+   PWConstCoefficient mu_func(mu);
+
    // 7. Define the parallel vector finite element spaces representing the mesh
    //    deformation x_gf, the velocity v_gf, and the initial configuration,
    //    x_ref. Define also the elastic energy density, w_gf, which is in a
@@ -319,15 +356,29 @@ int main(int argc, char *argv[])
    ParGridFunction x_ref(&fespace);
    pmesh->GetNodes(x_ref);
 
-   L2_FECollection w_fec(order + 1, dim);
+   L2_FECollection w_fec(order-1, dim);
    ParFiniteElementSpace w_fespace(pmesh, &w_fec);
    ParGridFunction w_gf(&w_fespace);
-   ParGridFunction sig11_gf(&w_fespace);
-   ParGridFunction sig22_gf(&w_fespace);
-   ParGridFunction sig33_gf(&w_fespace);
-   ParGridFunction sig12_gf(&w_fespace);
-   ParGridFunction sig23_gf(&w_fespace);
-   ParGridFunction sig31_gf(&w_fespace);
+   // Stress space:
+   // 1 component (xx) for 1D
+   // 4 components (xx, yy, xy, zz) for 2D plane strain;
+   // xx xy 0
+   // xy yy 0
+   // 0  0  zz
+   // 6 components (xx, yy, zz, xy, yz, xz) for 3D
+   // xx xy xz
+   // yx yy yz
+   // zx zy zz
+   ParFiniteElementSpace s_fespace(pmesh, &w_fec, (dim==2?4:6));
+   ParGridFunction s_gf(&s_fespace);
+   ParGridFunction ds_gf(&s_fespace);
+
+   // For reference:
+   // // B. Project the post-processing coefficient defined above to the
+   // //    'pp_field' GridFunction.
+   // CauchyStressIncrementCoefficient ds_coeff((dim==2?4:6), 3, x, lambda_func, mu_func);
+   // ds_gf.ProjectCoefficient(ds_coeff);
+   // s_gf += ds_gf;
 
    // 8. Set the initial conditions for v_gf, x_gf and vx, and define the
    //    boundary conditions on a beam-like mesh (see description above).
@@ -345,7 +396,8 @@ int main(int argc, char *argv[])
 
    // 9. Initialize the Hypoelastoplastic operator, the GLVis visualization and print
    //    the initial energies.
-   HypoelastoplasticOperator oper(fespace, ess_bdr, visc, mu, K);
+   // HypoelastoplasticOperator oper(fespace, ess_bdr, visc, mu, K);
+   HypoelastoplasticOperator oper(fespace, ess_bdr, visc, mu_func, lambda_func);
 
    socketstream vis_v, vis_w;
    if (visualization)
@@ -620,6 +672,72 @@ HypoelastoplasticOperator::HypoelastoplasticOperator(ParFiniteElementSpace &f,
    newton_solver.SetAbsTol(0.0);
    newton_solver.SetMaxIter(10);
 }
+
+
+HypoelastoplasticOperator::HypoelastoplasticOperator(ParFiniteElementSpace &f,
+                                           Array<int> &ess_bdr, double visc,
+                                           PWConstCoefficient mu_func,
+                                           PWConstCoefficient lambda_func)
+   : TimeDependentOperator(2*f.TrueVSize(), 0.0), fespace(f),
+     M(&fespace), S(&fespace), H(&fespace),
+     viscosity(visc), M_solver(f.GetComm()), newton_solver(f.GetComm()),
+     z(height/2)
+{
+   const double rel_tol = 1e-8;
+   const int skip_zero_entries = 0;
+
+   const double ref_density = 1.0; // density in the reference configuration
+   ConstantCoefficient rho0(ref_density);
+   M.AddDomainIntegrator(new VectorMassIntegrator(rho0));
+   M.Assemble(skip_zero_entries);
+   M.EliminateEssentialBC(ess_bdr);
+   M.Finalize(skip_zero_entries);
+   Mmat = M.ParallelAssemble();
+
+   M_solver.iterative_mode = false;
+   M_solver.SetRelTol(rel_tol);
+   M_solver.SetAbsTol(0.0);
+   M_solver.SetMaxIter(30);
+   M_solver.SetPrintLevel(0);
+   M_prec.SetType(HypreSmoother::Jacobi);
+   M_solver.SetPreconditioner(M_prec);
+   M_solver.SetOperator(*Mmat);
+
+   //model = new HypoelastoplasticModel(mu, K);
+   model = new HypoelastoplasticModel(lambda_func, mu_func);
+   H.AddDomainIntegrator(new HypoelastoplasticNLFIntegrator(model));
+   H.SetEssentialBC(ess_bdr);
+
+   ConstantCoefficient visc_coeff(viscosity);
+   S.AddDomainIntegrator(new VectorDiffusionIntegrator(visc_coeff));
+   S.Assemble(skip_zero_entries);
+   S.EliminateEssentialBC(ess_bdr);
+   S.Finalize(skip_zero_entries);
+
+   reduced_oper = new ReducedSystemOperator(&M, &S, &H);
+
+   HypreSmoother *J_hypreSmoother = new HypreSmoother;
+   J_hypreSmoother->SetType(HypreSmoother::l1Jacobi);
+   J_hypreSmoother->SetPositiveDiagonal(true);
+   J_prec = J_hypreSmoother;
+
+   MINRESSolver *J_minres = new MINRESSolver(f.GetComm());
+   J_minres->SetRelTol(rel_tol);
+   J_minres->SetAbsTol(0.0);
+   J_minres->SetMaxIter(300);
+   J_minres->SetPrintLevel(-1);
+   J_minres->SetPreconditioner(*J_prec);
+   J_solver = J_minres;
+
+   newton_solver.iterative_mode = false;
+   newton_solver.SetSolver(*J_solver);
+   newton_solver.SetOperator(*reduced_oper);
+   newton_solver.SetPrintLevel(1); // print Newton iterations
+   newton_solver.SetRelTol(rel_tol);
+   newton_solver.SetAbsTol(0.0);
+   newton_solver.SetMaxIter(10);
+}
+
 
 void HypoelastoplasticOperator::Mult(const Vector &vx, Vector &dvx_dt) const
 {

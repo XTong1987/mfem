@@ -532,13 +532,18 @@ void HypoelastoplasticNLFIntegrator::AssembleElementVector(
    for (int i = 0; i < ir.GetNPoints(); i++)
    {
       const IntegrationPoint &ip = ir.IntPoint(i);
-      Tr.SetIntPoint(&ip);
-      CalcInverse(Tr.Jacobian(), J0i);
+      Tr.SetIntPoint(&ip); // x = Tr(xi)
+      CalcInverse(Tr.Jacobian(), J0i); // J = dx_i/dxi_j
 
-      el.CalcDShape(ip, DSh);
-      Mult(DSh, J0i, DS);
-      MultAtB(PMatI, DS, J);
+      el.CalcDShape(ip, DSh); // DSh = gradN(xi)
+      Mult(DSh, J0i, DS); // DS = gradN(x) = gradN(xi) * J^(-1)
+      // velocity gradient tensor, J.
+      MultAtB(PMatI, DS, J); // J = F = v^T * gradN(x)
+      // strain rate tensor, J
+      J.Symmetrize();        // J = (1/2)*(grad(v) + grad(v)^t)
 
+      // Evaluate Cauchy stress using the HypoEPModel
+      // based on the strain rate tensor, J.
       model->EvalP(J, P);
 
       P *= ip.weight*Tr.Weight();
